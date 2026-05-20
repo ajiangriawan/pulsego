@@ -2,8 +2,17 @@
 
 use App\Models\Booking;
 use Illuminate\Support\Facades\Route;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use App\Livewire\Home;
+use App\Livewire\FieldDetail;
+use App\Livewire\Checkout;
+use App\Livewire\BookingHistory;
+use App\Http\Controllers\MidtransController;
 
-Route::view('/', 'welcome');
+Route::get('/', Home::class)->name('home');
+
+
+Route::get('/field/{id}', FieldDetail::class)->name('field.detail');
 
 Route::view('dashboard', 'dashboard')
     ->middleware(['auth', 'verified'])
@@ -23,5 +32,16 @@ Route::get('/validate/{booking_code}', function ($booking_code) {
     $booking = Booking::with(['user', 'field', 'items'])->where('booking_code', $booking_code)->firstOrFail();
     return view('validate', compact('booking'));
 })->name('booking.validate');
+
+Route::middleware('auth')->group(function () {
+    Route::get('/checkout/{id}', Checkout::class)->name('checkout');
+    Route::get('/checkout/{id}', Checkout::class)->name('checkout');
+    Route::get('/history', BookingHistory::class)->name('booking.history');
+    
+});
+
+
+// Route untuk menerima notifikasi otomatis dari Midtrans
+Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
 
 require __DIR__ . '/auth.php';
