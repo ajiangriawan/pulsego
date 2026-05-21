@@ -15,7 +15,8 @@ class Field extends Model implements HasMedia
     // TAMBAHKAN INI SEBAGAI PENGGANTI #[Fillable]
     protected $fillable = [
         'name', 
-        'description', 
+        'description',
+        'type',
         'address', 
         'latitude', 
         'longitude', 

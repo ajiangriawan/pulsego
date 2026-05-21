@@ -16,6 +16,7 @@ return new class extends Migration
             $table->string('name');
             $table->text('description')->nullable();
             $table->text('address');
+            $table->string('type');
             $table->string('latitude')->nullable();
             $table->string('longitude')->nullable();
             $table->json('facilities')->nullable(); // Simpan fasilitas dalam array JSON

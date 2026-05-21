@@ -11,8 +11,8 @@
                     </svg>
                 </a>
                 <div>
-                    <h1 class="text-white font-extrabold text-xl">Riwayat Booking</h1>
-                    <p class="text-green-200 text-xs">Semua aktivitas pemesanan Anda</p>
+                    <h1 class="text-white font-extrabold text-xl">Perlu Dibayar</h1>
+                    <p class="text-green-200 text-xs">Semua aktivitas pemesanan Anda yang belum dibayar</p>
                 </div>
             </div>
         </div>
@@ -20,11 +20,11 @@
 
     <div class="max-w-2xl mx-auto px-4 -mt-6 pb-6">
 
-        {{-- Stats Cards --}}
+        <!-- {{-- Stats Cards --}}
         <div class="grid grid-cols-3 gap-3 mb-6">
             @php
                 $totalBookings = $bookings->count();
-                $paidBookings = $bookings->whereIn('status', ['paid', 'dp_paid'])->count();
+                $paidBookings = $bookings->whereIn('status', 'dp_paid')->count();
                 $pendingBookings = $bookings->where('status', 'pending')->count();
             @endphp
             <div class="bg-white rounded-2xl p-4 text-center shadow-md border border-gray-100">
@@ -39,7 +39,7 @@
                 <p class="text-2xl font-extrabold text-yellow-500">{{ $pendingBookings }}</p>
                 <p class="text-[10px] font-semibold text-gray-400 mt-0.5">Menunggu</p>
             </div>
-        </div>
+        </div> -->
 
         {{-- Error Alert --}}
         @if(session()->has('error'))
@@ -178,8 +178,8 @@
             @empty
             <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-16 text-center">
                 <div class="text-6xl mb-4">🏟️</div>
-                <h3 class="font-extrabold text-gray-700 text-lg mb-2">Belum Ada Booking</h3>
-                <p class="text-gray-400 text-sm mb-6">Yuk, mulai booking lapangan favoritmu sekarang!</p>
+                <h3 class="font-extrabold text-gray-700 text-lg mb-2">Semua Booking Sudah Dibayar</h3>
+                <p class="text-gray-400 text-sm mb-6">Yuk, booking lagi lapangan favoritmu sekarang!</p>
                 <a href="{{ route('home') }}" wire:navigate
                    class="inline-flex items-center gap-2 py-3 px-6 rounded-2xl text-white font-bold text-sm transition"
                    style="background: linear-gradient(135deg, #3A9E3F, #6DBE4E); box-shadow: 0 4px 14px rgba(58,158,63,0.3);">

@@ -8,6 +8,8 @@ use App\Livewire\FieldDetail;
 use App\Livewire\Checkout;
 use App\Livewire\BookingHistory;
 use App\Http\Controllers\MidtransController;
+use App\Livewire\BookingHistoryPayment;
+use App\Livewire\FieldList;
 
 Route::get('/', Home::class)->name('home');
 
@@ -37,6 +39,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/checkout/{id}', Checkout::class)->name('checkout');
     Route::get('/checkout/{id}', Checkout::class)->name('checkout');
     Route::get('/history', BookingHistory::class)->name('booking.history');
+    Route::get('/history-payment', BookingHistoryPayment::class)->name('booking.history.payment');
+    Route::get('/field-list', FieldList::class)->name('field');
     
 });
 
