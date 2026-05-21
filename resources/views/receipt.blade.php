@@ -80,10 +80,10 @@
                 <span>Rp {{ number_format($booking->grand_total, 0, ',', '.') }}</span>
             </div>
 
-            <!-- Rincian Jika Pembayaran adalah DP (30%) -->
+            <!-- Rincian Jika Pembayaran adalah DP -->
             @if(in_array($booking->status, ['pending', 'dp_paid']) && $booking->payment_type == 'dp')
             <div class="flex justify-between text-sm text-gray-600 mt-2">
-                <span>Telah Dibayar (DP 30%):</span>
+                <span>Telah Dibayar :</span>
                 <span class="text-green-600 font-semibold">Rp {{ number_format($booking->paid_amount, 0, ',', '.') }}</span>
             </div>
             <div class="flex justify-between text-sm mt-2 pt-2 border-t border-dashed border-gray-300">

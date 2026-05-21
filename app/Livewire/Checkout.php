@@ -123,10 +123,15 @@ class Checkout extends Component
 
         $afterDiscount = max(0, $this->subtotal - $this->discountAmount);
         
-        // PPN 11% & DP 30%
+        // PPN 11%
         $this->ppnAmount = $afterDiscount * 0.11;
         $this->grandTotal = $afterDiscount + $this->ppnAmount;
-        $this->dpAmount = $this->grandTotal * 0.30;
+
+        // =================================================================
+        // PERBAIKAN 1: KALKULASI MINIMAL DP MENGIKUTI ATURAN BARIS LAPANGAN
+        // =================================================================
+        $minDpPercent = (float) ($this->field->min_dp_percent ?? 50.00);
+        $this->dpAmount = $this->grandTotal * ($minDpPercent / 100);
     }
 
     public function processPayment()
@@ -139,10 +144,13 @@ class Checkout extends Component
             'selectedTimes.required' => 'Pilih minimal 1 jam bermain.',
         ]);
 
-        // Nominal yang akan ditagihkan ke Midtrans sesuai pilihan kotak UI
+        // Recalculate untuk memastikan data aman sebelum dikirim ke payment gateway
+        $this->calculateTotal();
+
+        // Nominal dinamis yang akan ditagihkan ke Midtrans
         $amountToPay = $this->paymentType === 'dp' ? $this->dpAmount : $this->grandTotal;
 
-        // 1. Simpan Data Booking
+        // 1. Simpan Data Booking Utama
         $booking = Booking::create([
             'user_id' => auth()->id(),
             'field_id' => $this->field->id,
@@ -157,7 +165,7 @@ class Checkout extends Component
             'status' => 'pending',
         ]);
 
-        // 2. Simpan Item Jam
+        // 2. Simpan Item Jam Bermain yang Diambil
         foreach ($this->selectedTimes as $timeStr) {
             $parts = explode('|', $timeStr);
             BookingItem::create([
@@ -168,7 +176,7 @@ class Checkout extends Component
             ]);
         }
 
-        // 3. Konfigurasi Midtrans
+        // 3. Konfigurasi Transaksi Jaringan Midtrans
         Config::$serverKey = env('MIDTRANS_SERVER_KEY');
         Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
         Config::$isSanitized = true;
@@ -177,7 +185,7 @@ class Checkout extends Component
         $params = [
             'transaction_details' => [
                 'order_id' => $booking->booking_code,
-                'gross_amount' => round($amountToPay), // Nominal sesuai pilihan DP atau Full
+                'gross_amount' => round($amountToPay), // Nominal fleksibel mengikuti aturan database
             ],
             'customer_details' => [
                 'first_name' => auth()->user()->name,
@@ -187,16 +195,16 @@ class Checkout extends Component
         ];
 
         try {
-            // MENGGUNAKAN SNAP REDIRECT (Bukan Token Pop-up)
+            // MENGGUNAKAN SNAP REDIRECT (Sangat stabil untuk integrasi multi-device)
             $paymentUrl = Snap::createTransaction($params)->redirect_url;
             
             $booking->update(['midtrans_snap_token' => $paymentUrl]);
 
-            // Alihkan pelanggan langsung ke halaman aman Midtrans
+            // Alihkan pelanggan langsung ke halaman aman instan Midtrans
             return redirect()->away($paymentUrl);
             
         } catch (\Exception $e) {
-            session()->flash('error_promo', 'Gagal memproses ke Midtrans: ' . $e->getMessage());
+            session()->flash('error_promo', 'Gagal terhubung dengan sistem Midtrans: ' . $e->getMessage());
             return;
         }
     }

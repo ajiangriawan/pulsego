@@ -28,8 +28,16 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->colors([
-                'primary' => Color::Amber,
+                // Mengganti warna utama (Primary) dari Amber bawaan menjadi Hijau PulseGo
+                'primary' => Color::Hex('#3A9E3F'), 
+                
+                // Mengatur warna aksen pendukung lainnya (Opsional, Filament akan menyesuaikan otomatis jika tidak diisi)
+                'success' => Color::Hex('#1E6B2A'),
+                'warning' => Color::Hex('#6DBE4E'),
+                'danger' => Color::Amber,
+                'info' => Color::Blue,
             ])
+            ->font('Plus Jakarta Sans')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([

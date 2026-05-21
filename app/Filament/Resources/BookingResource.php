@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\BookingResource\Pages;
 use App\Models\Booking;
+use App\Models\Field; 
 use App\Models\FieldPrice;
 use Carbon\Carbon;
 use Filament\Forms;
@@ -31,10 +32,8 @@ class BookingResource extends Resource
                         Forms\Components\Select::make('user_id')
                             ->relationship('user', 'name', fn($query) => $query->where('role', 'customer'))
                             ->searchable()
-                            ->preload() // Menampilkan daftar user langsung saat diklik
+                            ->preload()
                             ->label('Customer (Kosongkan jika Walk-in/Offline)')
-
-                            // Fitur tambah Customer baru langsung dari pop-up
                             ->createOptionForm([
                                 Forms\Components\TextInput::make('name')
                                     ->label('Nama Lengkap')
@@ -52,7 +51,7 @@ class BookingResource extends Resource
                                 Forms\Components\TextInput::make('password')
                                     ->label('Password (Otomatis)')
                                     ->password()
-                                    ->default('pulsego123') // Default password
+                                    ->default('pulsego123')
                                     ->required()
                                     ->readOnly()
                                     ->helperText('Beritahu customer password defaultnya adalah: pulsego123'),
@@ -64,8 +63,14 @@ class BookingResource extends Resource
                             ->relationship('field', 'name')
                             ->required()
                             ->label('Pilih Lapangan')
-                            ->live() // Memanggil ulang form saat lapangan diubah
-                            ->afterStateUpdated(fn(Forms\Set $set) => $set('selected_times', [])),
+                            ->live()
+                            ->afterStateUpdated(function (Forms\Set $set) {
+                                $set('selected_times', []);
+                                $set('subtotal', 0);
+                                $set('ppn_amount', 0);
+                                $set('grand_total', 0);
+                                $set('dp_amount', 0);
+                            }),
                     ])->columns(2),
 
                 Forms\Components\Section::make('Jadwal & Waktu (Pilih Jam Bermain)')
@@ -128,8 +133,11 @@ class BookingResource extends Resource
                                     ->exists();
                             })
                             ->live()
-                            // KALKULASI TOTAL, PPN 11%, DAN DP 30%
-                            ->afterStateUpdated(function (Forms\Set $set, $state) {
+                            
+                            // =================================================================
+                            // PERBAIKAN UTAMA: AMBIL MIN DP % DINAMIS DARI DATABASE LAPANGAN
+                            // =================================================================
+                            ->afterStateUpdated(function (Forms\Set $set, Forms\Get $get, $state) {
                                 $subtotal = 0;
                                 if (is_array($state)) {
                                     foreach ($state as $val) {
@@ -140,14 +148,30 @@ class BookingResource extends Resource
                                     }
                                 }
 
-                                $ppn = $subtotal * 0.11; // PPN 11%
-                                $grandTotal = $subtotal + $ppn; // Subtotal + PPN
-                                $dpAmount = $grandTotal * 0.30; // DP 30% dari Grand Total
+                                $ppn = $subtotal * 0.11; 
+                                $grandTotal = $subtotal + $ppn;
+
+                                // Cari data lapangan yang dipilih untuk mendapatkan min_dp_percent aslinya
+                                $fieldId = $get('field_id');
+                                $minDpPercent = 50.00; // nilai default jaga-jaga jika field tidak ditemukan
+
+                                if ($fieldId) {
+                                    $field = Field::find($fieldId);
+                                    if ($field) {
+                                        $minDpPercent = (float) $field->min_dp_percent;
+                                    }
+                                }
+
+                                // Kalkulasi nominal DP berdasarkan % dari database lapangan tersebut
+                                $dpAmount = $grandTotal * ($minDpPercent / 100); 
 
                                 $set('subtotal', $subtotal);
                                 $set('ppn_amount', $ppn);
                                 $set('grand_total', $grandTotal);
                                 $set('dp_amount', $dpAmount);
+                                
+                                // Update label instruksi tipe pembayaran agar Admin tahu berapa % yang berlaku
+                                $set('dynamic_dp_label', "DP ({$minDpPercent}%)");
                             })
                             ->columns(3)
                             ->required(),
@@ -168,7 +192,7 @@ class BookingResource extends Resource
                                 ->label('PPN (11%)')
                                 ->numeric()
                                 ->readOnly()
-                                ->dehydrated(false) // Tidak disimpan ke database karena sudah masuk ke grand_total
+                                ->dehydrated(false)
                                 ->prefix('Rp'),
                             Forms\Components\TextInput::make('grand_total')
                                 ->label('Total Keseluruhan')
@@ -177,10 +201,10 @@ class BookingResource extends Resource
                                 ->readOnly()
                                 ->prefix('Rp'),
                             Forms\Components\TextInput::make('dp_amount')
-                                ->label('Wajib DP (30% dari Total)')
+                                ->label('Minimal Wajib DP (Mengikuti Aturan Lapangan)')
                                 ->numeric()
                                 ->readOnly()
-                                ->dehydrated(false) // Hanya untuk visual panduan Admin
+                                ->dehydrated(false)
                                 ->prefix('Rp'),
                         ])->columns(2),
 
@@ -188,7 +212,7 @@ class BookingResource extends Resource
                             Forms\Components\Select::make('payment_type')
                                 ->label('Tipe Pembayaran')
                                 ->options([
-                                    'dp' => 'DP (30%)',
+                                    'dp' => 'Uang Muka (DP)',
                                     'full' => 'Lunas (100%)',
                                 ])
                                 ->required()
@@ -256,7 +280,7 @@ class BookingResource extends Resource
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
-                    ExportBulkAction::make(), // Export ke Excel
+                    ExportBulkAction::make(),
                 ]),
             ])
             ->defaultSort('created_at', 'desc');

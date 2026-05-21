@@ -253,7 +253,7 @@
                                     <div class="rounded-xl border-2 p-3.5 transition-all bg-white border-gray-200 hover:border-green-300 peer-checked:border-green-600 peer-checked:bg-green-50">
                                         <div class="flex justify-between items-center">
                                             <div>
-                                                <p class="font-bold text-gray-900 text-sm">Bayar DP (30%)</p>
+                                                <p class="font-bold text-gray-900 text-sm">Bayar DP</p>
                                                 <p class="text-[10px] text-red-500 font-semibold">
                                                     Sisa Rp {{ number_format($grandTotal - $dpAmount, 0, ',', '.') }} di tempat
                                                 </p>
