@@ -4,7 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\BookingResource\Pages;
 use App\Models\Booking;
-use App\Models\Field; 
+use App\Models\Field;
 use App\Models\FieldPrice;
 use Carbon\Carbon;
 use Filament\Forms;
@@ -14,6 +14,12 @@ use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction;
+use Filament\Forms\Components\Section;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Grid;
+use Filament\Tables\Columns\IconColumn;
+use Filament\Tables\Filters\TernaryFilter;
+use Filament\Tables\Actions\Action;
 
 class BookingResource extends Resource
 {
@@ -133,10 +139,6 @@ class BookingResource extends Resource
                                     ->exists();
                             })
                             ->live()
-                            
-                            // =================================================================
-                            // PERBAIKAN UTAMA: AMBIL MIN DP % DINAMIS DARI DATABASE LAPANGAN
-                            // =================================================================
                             ->afterStateUpdated(function (Forms\Set $set, Forms\Get $get, $state) {
                                 $subtotal = 0;
                                 if (is_array($state)) {
@@ -148,12 +150,11 @@ class BookingResource extends Resource
                                     }
                                 }
 
-                                $ppn = $subtotal * 0.11; 
+                                $ppn = $subtotal * 0.11;
                                 $grandTotal = $subtotal + $ppn;
 
-                                // Cari data lapangan yang dipilih untuk mendapatkan min_dp_percent aslinya
                                 $fieldId = $get('field_id');
-                                $minDpPercent = 50.00; // nilai default jaga-jaga jika field tidak ditemukan
+                                $minDpPercent = 50.00;
 
                                 if ($fieldId) {
                                     $field = Field::find($fieldId);
@@ -162,15 +163,12 @@ class BookingResource extends Resource
                                     }
                                 }
 
-                                // Kalkulasi nominal DP berdasarkan % dari database lapangan tersebut
-                                $dpAmount = $grandTotal * ($minDpPercent / 100); 
+                                $dpAmount = $grandTotal * ($minDpPercent / 100);
 
                                 $set('subtotal', $subtotal);
                                 $set('ppn_amount', $ppn);
                                 $set('grand_total', $grandTotal);
                                 $set('dp_amount', $dpAmount);
-                                
-                                // Update label instruksi tipe pembayaran agar Admin tahu berapa % yang berlaku
                                 $set('dynamic_dp_label', "DP ({$minDpPercent}%)");
                             })
                             ->columns(3)
@@ -229,6 +227,29 @@ class BookingResource extends Resource
                                 ->default('paid'),
                         ])->columns(2),
                     ]),
+
+                Section::make('Informasi Pengembalian Dana (Refund)')
+                    ->description('Detail rekening pelanggan untuk pencairan dana pelunasan. (Hanya muncul untuk transaksi batal yang memiliki sisa dana).')
+                    ->schema([
+                        Grid::make(3)->schema([
+                            TextInput::make('refund_bank')
+                                ->label('Bank Tujuan')
+                                ->disabled(), 
+                            TextInput::make('refund_account')
+                                ->label('Nomor Rekening')
+                                ->disabled(), 
+                            TextInput::make('refund_name')
+                                ->label('Atas Nama')
+                                ->disabled(), 
+                        ]),
+                    ])
+                    ->visible(function (?Booking $record): bool {
+                        // Form Rekening HANYA muncul jika mode Edit, status dibatalkan, dan data refund tidak kosong
+                        if (!$record) {
+                            return false;
+                        }
+                        return $record->status === 'cancelled' && !empty($record->refund_bank);
+                    }),
             ]);
     }
 
@@ -248,6 +269,23 @@ class BookingResource extends Resource
                         'dp_paid' => 'info',
                         'paid' => 'success',
                         'cancelled' => 'danger',
+                    })
+                    ->formatStateUsing(fn(string $state): string => match ($state) {
+                        'pending' => 'Menunggu Pembayaran',
+                        'dp_paid' => 'DP Terbayar',
+                        'paid' => 'Lunas',
+                        'cancelled' => 'Dibatalkan',
+                        default => ucfirst($state),
+                    }),
+                IconColumn::make('is_refunded')
+                    ->label('Status Refund')
+                    ->boolean()
+                    ->getStateUsing(function ($record) {
+                        // Render icon hanya untuk transaksi batal dan memiliki data rekening
+                        if ($record && $record->status === 'cancelled' && $record->refund_bank !== null) {
+                            return (bool) $record->is_refunded;
+                        }
+                        return null; // Kosong jika belum batal / tidak perlu refund
                     }),
             ])
             ->filters([
@@ -258,6 +296,16 @@ class BookingResource extends Resource
                         'paid' => 'Lunas',
                         'cancelled' => 'Dibatalkan',
                     ]),
+                TernaryFilter::make('is_refunded')
+                    ->label('Filter Status Refund')
+                    ->placeholder('Semua Transaksi')
+                    ->trueLabel('Sudah Di-refund')
+                    ->falseLabel('Belum Di-refund')
+                    ->queries(
+                        true: fn($query) => $query->where('status', 'cancelled')->where('is_refunded', true),
+                        false: fn($query) => $query->where('status', 'cancelled')->whereNotNull('refund_bank')->where('is_refunded', false),
+                        blank: fn($query) => $query,
+                    ),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
@@ -276,6 +324,28 @@ class BookingResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn(Booking $record) => in_array($record->status, ['pending', 'dp_paid']))
                     ->action(fn(Booking $record) => $record->update(['status' => 'paid', 'paid_amount' => $record->grand_total])),
+                
+                Tables\Actions\Action::make('cancelBooking')
+                    ->label('Batalkan Pesanan')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading('Batalkan Pesanan Ini?')
+                    ->modalDescription('Apakah Anda yakin ingin membatalkan pesanan ini dari sisi Admin? (Status akan berubah menjadi Dibatalkan).')
+                    ->visible(fn(Booking $record) => in_array($record->status, ['pending', 'dp_paid', 'paid']))
+                    ->action(fn(Booking $record) => $record->update(['status' => 'cancelled'])),
+
+                Action::make('markAsRefunded')
+                    ->label('Tandai Sudah Transfer')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->requiresConfirmation() 
+                    ->modalHeading('Konfirmasi Transfer Pengembalian Dana')
+                    ->modalDescription('Pastikan Anda sudah mentransfer dana ke rekening pelanggan sebelum menandai ini. Tindakan ini akan mengubah status refund menjadi Selesai.')
+                    ->visible(fn($record) => $record->status === 'cancelled' && $record->refund_bank !== null && $record->is_refunded == false)
+                    ->action(function ($record) {
+                        $record->update(['is_refunded' => true]);
+                    }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([

@@ -25,6 +25,10 @@ class Booking extends Model
         'paid_amount',
         'payment_type',
         'status',
+        'refund_bank',
+        'refund_account',
+        'refund_name',
+        'is_refunded',
         'midtrans_snap_token'
     ];
 

@@ -10,6 +10,7 @@ use App\Livewire\BookingHistory;
 use App\Http\Controllers\MidtransController;
 use App\Livewire\BookingHistoryPayment;
 use App\Livewire\FieldList;
+use App\Http\Controllers\Api\AuthController;
 
 Route::get('/', Home::class)->name('home');
 
@@ -44,8 +45,9 @@ Route::middleware('auth')->group(function () {
     
 });
 
-
-// Route untuk menerima notifikasi otomatis dari Midtrans
 Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
+
+Route::get('/reset-password/{token}', [AuthController::class, 'showResetForm'])->name('password.reset');
+Route::post('/reset-password', [AuthController::class, 'resetPassword'])->name('password.update');
 
 require __DIR__ . '/auth.php';

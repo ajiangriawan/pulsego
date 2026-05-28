@@ -24,6 +24,10 @@ return new class extends Migration
             $table->decimal('paid_amount', 15, 2)->default(0);
             $table->enum('payment_type', ['dp', 'full']);
             $table->enum('status', ['pending', 'dp_paid', 'paid', 'cancelled'])->default('pending');
+            $table->string('refund_bank')->nullable();
+            $table->string('refund_account')->nullable();
+            $table->string('refund_name')->nullable();
+            $table->boolean('is_refunded')->default(false);
             $table->string('midtrans_snap_token')->nullable();
             $table->timestamps();
         });

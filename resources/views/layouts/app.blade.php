@@ -47,7 +47,7 @@
             background: white;
             border-radius: 16px;
             border: 1px solid #E5E7EB;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
         }
 
         .nav-link-active {
@@ -78,8 +78,8 @@
     <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-bottom">
         <div class="flex justify-around items-center py-2">
             <a href="{{ route('home') }}"
-               wire:navigate
-               class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('home') ? 'active' : '' }}">
+                wire:navigate
+                class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('home') ? 'active' : '' }}">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 {{ request()->routeIs('home') ? 'text-green-600' : 'text-gray-400' }}" fill="{{ request()->routeIs('home') ? 'currentColor' : 'none' }}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                 </svg>
@@ -87,8 +87,8 @@
             </a>
 
             <a href="{{ route('booking.history') }}"
-               wire:navigate
-               class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('booking.history') ? 'active' : '' }}">
+                wire:navigate
+                class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('booking.history') ? 'active' : '' }}">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 {{ request()->routeIs('booking.history') ? 'text-green-600' : 'text-gray-400' }}" fill="{{ request()->routeIs('booking.history') ? 'currentColor' : 'none' }}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
@@ -96,7 +96,7 @@
             </a>
 
             <a href="{{ route('booking.history.payment') }}"
-               class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1">
+                class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                 </svg>
@@ -104,8 +104,8 @@
             </a>
 
             <a href="{{ route('profile') }}"
-               wire:navigate
-               class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('profile') ? 'active' : '' }}">
+                wire:navigate
+                class="bottom-nav-item flex flex-col items-center gap-0.5 px-4 py-1 {{ request()->routeIs('profile') ? 'active' : '' }}">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 {{ request()->routeIs('profile') ? 'text-green-600' : 'text-gray-400' }}" fill="{{ request()->routeIs('profile') ? 'currentColor' : 'none' }}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
@@ -113,6 +113,7 @@
             </a>
         </div>
     </nav>
-
+    @livewire('chatbot')
 </body>
+
 </html>
