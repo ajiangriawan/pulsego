@@ -18,6 +18,8 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'sendResetLinkEmail']);
 Route::get('/fields/{id}/times', [HomeController::class, 'getAvailableTimes']);
 
+Route::post('/chat', [\App\Http\Controllers\Api\HomeController::class, 'chatWithAi']);
+
 // Rute Privat (HANYA bisa diakses jika membawa Token Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);

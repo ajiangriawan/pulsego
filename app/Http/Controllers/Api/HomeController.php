@@ -503,4 +503,34 @@ class HomeController extends Controller
             'refund_amount' => $refundAmount
         ]);
     }
+
+    // === FITUR CHATBOT AI ===
+    public function chatWithAi(Request $request, \App\Services\GeminiService $gemini)
+    {
+        // Validasi data dari HP
+        $request->validate([
+            'chatHistory' => 'required|array',
+            'lat' => 'nullable|numeric',
+            'lng' => 'nullable|numeric',
+        ]);
+
+        try {
+            // Lempar riwayat chat ke service Gemini yang sudah kamu buat
+            $botReply = $gemini->getChatReply(
+                $request->chatHistory,
+                $request->lat,
+                $request->lng
+            );
+
+            return response()->json([
+                'success' => true,
+                'reply' => $botReply
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghubungi AI: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
