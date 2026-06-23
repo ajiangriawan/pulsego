@@ -12,6 +12,7 @@ use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Midtrans\Config;
 use Midtrans\Snap;
+use Exception;
 
 class Checkout extends Component
 {
@@ -87,6 +88,15 @@ class Checkout extends Component
 
     public function applyPromo()
     {
+        // Pastikan input promo berupa string (karena bisa terkirim null dari Alpine.js)
+        $this->promoCode = (string) $this->promoCode;
+
+        if (empty($this->promoCode)) {
+            $this->appliedPromo = null;
+            $this->calculateTotal();
+            return;
+        }
+
         $promo = Promo::where('code', $this->promoCode)
             ->whereDate('valid_until', '>=', Carbon::today())
             ->first();
@@ -123,15 +133,13 @@ class Checkout extends Component
 
         $afterDiscount = max(0, $this->subtotal - $this->discountAmount);
         
-        // PPN 11%
-        $this->ppnAmount = $afterDiscount * 0.11;
+        // === PERBAIKAN 1: PPN 11% (Dibulatkan ke atas agar tidak ada masalah koma desimal)
+        $this->ppnAmount = ceil($afterDiscount * 0.11);
         $this->grandTotal = $afterDiscount + $this->ppnAmount;
 
-        // =================================================================
-        // PERBAIKAN 1: KALKULASI MINIMAL DP MENGIKUTI ATURAN BARIS LAPANGAN
-        // =================================================================
+        // KALKULASI MINIMAL DP MENGIKUTI ATURAN BARIS LAPANGAN
         $minDpPercent = (float) ($this->field->min_dp_percent ?? 50.00);
-        $this->dpAmount = $this->grandTotal * ($minDpPercent / 100);
+        $this->dpAmount = ceil($this->grandTotal * ($minDpPercent / 100)); // Dibulatkan ke atas juga
     }
 
     public function processPayment()
@@ -150,61 +158,72 @@ class Checkout extends Component
         // Nominal dinamis yang akan ditagihkan ke Midtrans
         $amountToPay = $this->paymentType === 'dp' ? $this->dpAmount : $this->grandTotal;
 
-        // 1. Simpan Data Booking Utama
-        $booking = Booking::create([
-            'user_id' => auth()->id(),
-            'field_id' => $this->field->id,
-            'promo_id' => $this->appliedPromo ? $this->appliedPromo->id : null,
-            'booking_code' => 'PLG-' . strtoupper(uniqid()),
-            'booking_date' => $this->bookingDate,
-            'subtotal' => $this->subtotal,
-            'discount' => $this->discountAmount,
-            'grand_total' => $this->grandTotal,
-            'paid_amount' => 0,
-            'payment_type' => $this->paymentType,
-            'status' => 'pending',
-        ]);
-
-        // 2. Simpan Item Jam Bermain yang Diambil
-        foreach ($this->selectedTimes as $timeStr) {
-            $parts = explode('|', $timeStr);
-            BookingItem::create([
-                'booking_id' => $booking->id,
-                'start_time' => $parts[0],
-                'end_time'   => $parts[1],
-                'price'      => $parts[2],
-            ]);
-        }
-
-        // 3. Konfigurasi Transaksi Jaringan Midtrans
-        Config::$serverKey = env('MIDTRANS_SERVER_KEY');
-        Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
-        Config::$isSanitized = true;
-        Config::$is3ds = true;
-
-        $params = [
-            'transaction_details' => [
-                'order_id' => $booking->booking_code,
-                'gross_amount' => round($amountToPay), // Nominal fleksibel mengikuti aturan database
-            ],
-            'customer_details' => [
-                'first_name' => auth()->user()->name,
-                'email' => auth()->user()->email,
-                'phone' => auth()->user()->phone ?? '081111111111',
-            ]
-        ];
+        // === PERBAIKAN 2: Gunakan \DB::beginTransaction() untuk melindungi data gantung
+        \DB::beginTransaction();
 
         try {
-            // MENGGUNAKAN SNAP REDIRECT (Sangat stabil untuk integrasi multi-device)
+            // 1. Simpan Data Booking Utama
+            $booking = Booking::create([
+                'user_id' => auth()->id(),
+                'field_id' => $this->field->id,
+                'promo_id' => $this->appliedPromo ? $this->appliedPromo->id : null,
+                'booking_code' => 'PLG-' . strtoupper(uniqid()),
+                'booking_date' => $this->bookingDate,
+                'subtotal' => $this->subtotal,
+                'discount' => $this->discountAmount,
+                'tax' => $this->ppnAmount, // PENTING: Tambahkan ini jika di tabelmu ada kolom tax (sebaiknya ada)
+                'grand_total' => $this->grandTotal,
+                'paid_amount' => 0,
+                'payment_type' => $this->paymentType,
+                'status' => 'pending',
+            ]);
+
+            // 2. Simpan Item Jam Bermain yang Diambil
+            foreach ($this->selectedTimes as $timeStr) {
+                $parts = explode('|', $timeStr);
+                BookingItem::create([
+                    'booking_id' => $booking->id,
+                    'start_time' => $parts[0],
+                    'end_time'   => $parts[1],
+                    'price'      => $parts[2],
+                ]);
+            }
+
+            // 3. Konfigurasi Transaksi Jaringan Midtrans
+            Config::$serverKey = env('MIDTRANS_SERVER_KEY');
+            Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
+            Config::$isSanitized = true;
+            Config::$is3ds = true;
+
+            $params = [
+                'transaction_details' => [
+                    'order_id' => $booking->booking_code,
+                    'gross_amount' => (int) round($amountToPay), // Pastikan menjadi Integer murni
+                ],
+                'customer_details' => [
+                    'first_name' => auth()->user()->name,
+                    'email' => auth()->user()->email,
+                    'phone' => auth()->user()->phone ?? '081111111111',
+                ]
+            ];
+
+            // MENGGUNAKAN SNAP REDIRECT
             $paymentUrl = Snap::createTransaction($params)->redirect_url;
             
             $booking->update(['midtrans_snap_token' => $paymentUrl]);
 
+            // Jika Midtrans berhasil, kunci data di database
+            \DB::commit();
+
             // Alihkan pelanggan langsung ke halaman aman instan Midtrans
-            return redirect()->away($paymentUrl);
+            return redirect()->to($paymentUrl);
             
-        } catch (\Exception $e) {
-            session()->flash('error_promo', 'Gagal terhubung dengan sistem Midtrans: ' . $e->getMessage());
+        } catch (Exception $e) {
+            // Jika GAGAL, hapus data pesanan dari database (Rollback) agar tidak menumpuk
+            \DB::rollBack();
+            
+            // Tampilkan pesan error di layar pengguna (bukan halaman blank)
+            session()->flash('error_payment', 'Gagal terhubung dengan sistem pembayaran: ' . $e->getMessage());
             return;
         }
     }

@@ -358,20 +358,40 @@ class HomeController extends Controller
     {
         $user = $request->user();
 
-        // Validasi data yang dikirim dari HP
+        // Validasi data yang dikirim dari HP (Tambahkan validasi promo_id)
         $request->validate([
             'field_id' => 'required|exists:fields,id',
             'booking_date' => 'required|date',
             'payment_type' => 'required|in:full,dp',
             'subtotal' => 'required|numeric',
             'items' => 'required|array', // Array jadwal yang dipilih
+            'promo_id' => 'nullable|exists:promos,id', // Validasi promo jika ada
         ]);
 
         $subtotal = $request->subtotal;
-        $tax = $subtotal * 0.11; // PPN 11%
-        $grandTotal = $subtotal + $tax;
+        $discountAmount = 0;
 
-        // === PERBAIKAN: TARIK PERSENTASE DP DARI DATABASE ===
+        // === PERHITUNGAN DISKON ===
+        // Cek jika user mengirimkan promo_id dan promo tersebut valid
+        if ($request->filled('promo_id')) {
+            $promo = \App\Models\Promo::find($request->promo_id);
+            if ($promo) {
+                if ($promo->discount_type === 'percent') {
+                    $discountAmount = $subtotal * ($promo->discount_amount / 100);
+                } else {
+                    $discountAmount = $promo->discount_amount;
+                }
+            }
+        }
+
+        // Pastikan subtotal setelah diskon tidak minus
+        $afterDiscount = max(0, $subtotal - $discountAmount);
+
+        // PPN 11% dihitung dari harga setelah diskon
+        $tax = $afterDiscount * 0.11;
+        $grandTotal = $afterDiscount + $tax;
+
+        // === TARIK PERSENTASE DP DARI DATABASE ===
         $field = \App\Models\Field::findOrFail($request->field_id);
         $dpPercent = (float) ($field->min_dp_percent ?? 50.00); // Default 50% jika kosong
 
@@ -380,20 +400,23 @@ class HomeController extends Controller
 
         // Buat ID Booking Unik
         $bookingCode = 'PLS-' . date('dmy') . '-' . strtoupper(\Illuminate\Support\Str::random(4));
+
         // 1. Simpan Data ke Tabel Bookings
-        $booking = Booking::create([
+        $booking = \App\Models\Booking::create([
             'user_id' => $user->id,
             'field_id' => $request->field_id,
+            'promo_id' => $request->promo_id, // Simpan ID Promo (Bisa null)
             'booking_code' => $bookingCode,
             'booking_date' => $request->booking_date,
             'subtotal' => $subtotal,
+            'discount' => $discountAmount, // Simpan Nominal Diskon
             'tax' => $tax,
             'grand_total' => $grandTotal,
             'payment_type' => $request->payment_type,
             'status' => 'pending', // Status awal
         ]);
 
-        // 2. Simpan Detail Jam Bermain ke Tabel Items (Sesuaikan dengan nama tabel relasimu)
+        // 2. Simpan Detail Jam Bermain ke Tabel Items
         foreach ($request->items as $item) {
             $booking->items()->create([
                 'start_time' => $item['start_time'],
@@ -402,6 +425,7 @@ class HomeController extends Controller
             ]);
         }
 
+        // === KONFIGURASI MIDTRANS ===
         \Midtrans\Config::$serverKey = env('MIDTRANS_SERVER_KEY');
         \Midtrans\Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
         \Midtrans\Config::$isSanitized = true;
@@ -410,7 +434,7 @@ class HomeController extends Controller
         $params = [
             'transaction_details' => [
                 'order_id' => $bookingCode,
-                'gross_amount' => round($grossAmount),
+                'gross_amount' => round($grossAmount), // Midtrans membutuhkan angka bulat
             ],
             'customer_details' => [
                 'first_name' => $user->name,
@@ -432,14 +456,15 @@ class HomeController extends Controller
                 'payment_url' => $paymentUrl
             ]);
         } catch (\Exception $e) {
+            // Jika Midtrans gagal, hapus booking yang terlanjur dibuat agar tidak jadi data sampah
+            $booking->delete();
+
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal terhubung ke sistem pembayaran: ' . $e->getMessage()
             ], 500);
         }
     }
-
-
 
     // === FUNGSI PEMBATALAN PESANAN (MOBILE) ===
     public function cancelBooking(Request $request, $id)
@@ -532,5 +557,16 @@ class HomeController extends Controller
                 'message' => 'Gagal menghubungi AI: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public function getPromos()
+    {
+        // Ambil promo yang batas berlakunya masih hari ini atau ke depan
+        $promos = \App\Models\Promo::whereDate('valid_until', '>=', \Carbon\Carbon::today())->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $promos
+        ]);
     }
 }
