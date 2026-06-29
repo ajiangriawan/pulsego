@@ -30,7 +30,7 @@ class HomeController extends Controller
             $query->latest();
         }
 
-        // Ambil maksimal 5 data lapangan
+        // Ambil maksimal 2 data lapangan
         $fields = $query->take(2)->get()->map(function ($field) use ($lat, $lng) {
             $price = $field->prices->first() ? $field->prices->first()->price : 0;
 
@@ -52,17 +52,42 @@ class HomeController extends Controller
                 'image_url' => $field->getFirstMediaUrl('gallery') ?: null,
                 'price_formatted' => number_format($price, 0, ',', '.'),
                 'rating' => '4.8',
-
-                // KUNCI UTAMA: Mengirimkan teks jarak hasil hitungan ke React Native
                 'distance' => $distanceText
             ];
         });
 
+        // =========================================================
+        // LOGIKA BARU: NOTIFIKASI UNTUK USER YANG SEDANG LOGIN
+        // =========================================================
+        $user = auth('sanctum')->user(); // Cek user menggunakan token API
+        $gameToday = null;
+        $recentBookings = [];
+
+        if ($user) {
+            $today = \Carbon\Carbon::today()->format('Y-m-d');
+            
+            // Cek jadwal main hari ini
+            $gameToday = \App\Models\Booking::where('user_id', $user->id)
+                ->whereDate('booking_date', $today)
+                ->whereIn('status', ['paid', 'dp_paid'])
+                ->with('field') // Ambil relasi field untuk mendapatkan nama lapangan
+                ->first();
+
+            // Ambil 5 riwayat pesanan terakhir
+            $recentBookings = \App\Models\Booking::where('user_id', $user->id)
+                ->orderBy('created_at', 'desc')
+                ->take(5)
+                ->get();
+        }
+
+        // 4. Kembalikan semua data ke React Native
         return response()->json([
             'success' => true,
             'message' => 'Data beranda berhasil diambil',
             'data' => [
-                'popular_fields' => $fields
+                'popular_fields' => $fields,
+                'game_today' => $gameToday,             // <-- Dikirim ke aplikasi
+                'recent_bookings' => $recentBookings    // <-- Dikirim ke aplikasi
             ]
         ], 200);
     }

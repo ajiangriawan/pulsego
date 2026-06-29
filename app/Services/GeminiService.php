@@ -21,18 +21,21 @@ class GeminiService
 
     public function getChatReply(array $chatHistory, $userLat = null, $userLng = null)
     {
+        // Default koordinat Palembang jika GPS user belum terkunci
         $lat = $userLat ? (float) $userLat : -2.990934; 
         $lng = $userLng ? (float) $userLng : 104.756554;
 
-        // INSTRUKSI SISTEM DIPERKETAT AGAR TIDAK BERTELE-TELE
+        // INSTRUKSI SISTEM DIPERKETAT
         $systemInstruction = "Kamu adalah virtual asisten pintar resmi dari PulseGo Palembang. "
             . "ATURAN KETAT: Jawab LANGSUNG pada intinya dengan hasil akhir. JANGAN PERNAH mengucapkan 'Sebentar ya, aku carikan', 'Oke, aku cek dulu', atau kalimat penunda lainnya. "
             . "Kamu WAJIB langsung memberikan data asli menggunakan fungsi (tools). "
             . "Jika user meminta lapangan terdekat, panggil `getNearbyFields` dan langsung berikan daftarnya. "
             . "Jika user meminta lapangan kosong, panggil `getAvailableFieldsByTime` dan langsung berikan daftarnya. "
+            . "Jika user menanyakan harga, mencari lapangan murah, atau mencari batasan harga, panggil `getFieldPrices` dan berikan harganya. "
             . "Lokasi GPS user saat ini: Lat: $lat, Lng: $lng. "
             . "Gunakan bahasa santai/casual yang ramah dan langsung ke inti (to the point).";
 
+        // Mendaftarkan 3 Fungsi/Skill AI
         $tools = [
             [
                 'functionDeclarations' => [
@@ -54,6 +57,17 @@ class GeminiService
                                 'time' => ['type' => 'STRING', 'description' => 'Format H:i (contoh: 10:00)']
                             ],
                             'required' => ['date', 'time']
+                        ]
+                    ],
+                    [
+                        'name' => 'getFieldPrices',
+                        'description' => 'Mencari informasi harga lapangan berdasarkan nama lapangan atau mencari rekomendasi lapangan di bawah batasan harga tertentu.',
+                        'parameters' => [
+                            'type' => 'OBJECT',
+                            'properties' => [
+                                'field_name' => ['type' => 'STRING', 'description' => 'Nama lapangan (opsional, gunakan jika user bertanya harga lapangan spesifik)'],
+                                'max_price' => ['type' => 'INTEGER', 'description' => 'Batas harga maksimal per jam (opsional, gunakan jika user mencari lapangan di bawah harga tertentu)']
+                            ]
                         ]
                     ]
                 ]
@@ -78,7 +92,7 @@ class GeminiService
                 'contents' => $formattedMessages,
                 'systemInstruction' => ['parts' => [['text' => $systemInstruction]]],
                 'tools' => $tools,
-                'generationConfig' => ['temperature' => 0.2] // Turunkan temperature agar fokus pada instruksi
+                'generationConfig' => ['temperature' => 0.2] // Fokus pada keakuratan data
             ];
 
             try {
@@ -97,34 +111,40 @@ class GeminiService
                     return "Aku tidak menerima respon dari server pusat, coba tanyakan lagi ya!";
                 }
 
-                // Jika Gemini memanggil Function
+                // Jika Gemini memutuskan untuk memanggil Fungsi Database
                 if (isset($parts[0]['functionCall'])) {
                     $functionCall = $parts[0]['functionCall'];
                     $functionName = $functionCall['name'];
                     
-                    $arguments = !empty($functionCall['args']) ? $functionCall['args'] : (object)[];
+                    // ==========================================
+                    // FIX: Konversi parameter murni ke Array PHP
+                    // ==========================================
+                    $argsArray = isset($functionCall['args']) ? (array) $functionCall['args'] : [];
 
                     $dbResult = '';
                     if ($functionName === 'getNearbyFields') {
                         $dbResult = $this->getNearbyFields($lat, $lng);
                     } elseif ($functionName === 'getAvailableFieldsByTime') {
-                        $dbResult = $this->getAvailableFieldsByTime($arguments['date'] ?? null, $arguments['time'] ?? null);
+                        $dbResult = $this->getAvailableFieldsByTime($argsArray['date'] ?? null, $argsArray['time'] ?? null);
+                    } elseif ($functionName === 'getFieldPrices') {
+                        $dbResult = $this->getFieldPrices($argsArray['field_name'] ?? null, $argsArray['max_price'] ?? null);
                     }
 
-                    // Rekam instruksi pemanggilan dari AI
+                    // Rekam jejak pemanggilan fungsi
                     $formattedMessages[] = [
                         'role' => 'model',
                         'parts' => [
                             [
                                 'functionCall' => [
                                     'name' => $functionName,
-                                    'args' => $arguments
+                                    // Kembalikan ke format Object (JSON) untuk API Google
+                                    'args' => empty($argsArray) ? (object)[] : $argsArray
                                 ]
                             ]
                         ]
                     ];
 
-                    // Suapkan hasil database ke AI
+                    // Suapkan balasan/hasil database ke AI
                     $formattedMessages[] = [
                         'role' => 'tool',
                         'parts' => [
@@ -140,10 +160,10 @@ class GeminiService
                     ];
 
                     $attempts++;
-                    continue; 
+                    continue; // Putar ulang loop agar AI memproses teks dari hasil DB
                 }
 
-                // Berikan teks final
+                // Jika bukan function call, berikan teks final ke User
                 return $parts[0]['text'] ?? "Pencarian selesai, tapi teks gagal diformat. Coba tanya lagi ya! 😊";
 
             } catch (\Exception $e) {
@@ -159,15 +179,19 @@ class GeminiService
     {
         try {
             if (!$lat || !$lng || abs($lat) < 0.001 || $lat == -2.990934) {
-                $fields = Field::take(3)->get();
+                $fields = Field::with('prices')->take(3)->get();
                 if ($fields->isEmpty()) return "Tidak ada data lapangan terdaftar.";
                 
                 return "Berikut lapangan di Palembang:\n" . 
-                    $fields->map(fn($f) => "- {$f->name} ({$f->type}) di {$f->address}")->implode("\n") . 
+                    $fields->map(function($f) {
+                        $hargaMulai = $f->prices->min('price') ? "Rp " . number_format($f->prices->min('price'), 0, ',', '.') : "Harga hubungi admin";
+                        return "- {$f->name} ({$f->type}) di {$f->address}. (Mulai dari {$hargaMulai})";
+                    })->implode("\n") . 
                     "\n\n*(Aktifkan GPS browser untuk menghitung jarak akurat!)*";
             }
 
-            $fields = Field::selectRaw("name, address, type, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance", [$lat, $lng, $lat])
+            $fields = Field::with('prices')
+                ->selectRaw("id, name, address, type, (6371 * acos(cos(radians(?)) * cos(radians(latitude)) * cos(radians(longitude) - radians(?)) + sin(radians(?)) * sin(radians(latitude)))) AS distance", [$lat, $lng, $lat])
                 ->orderBy('distance', 'asc')
                 ->take(3)
                 ->get();
@@ -178,7 +202,9 @@ class GeminiService
                 $jarakTeks = $f->distance < 1 
                     ? number_format($f->distance * 1000, 0) . " meter" 
                     : number_format($f->distance, 1) . " km";
-                return "- {$f->name} ({$f->type}) | Jarak: {$jarakTeks} | Alamat: {$f->address}";
+                $hargaMulai = $f->prices->min('price') ? "Mulai Rp " . number_format($f->prices->min('price'), 0, ',', '.') : "Hubungi admin";
+                
+                return "- {$f->name} ({$f->type}) | Jarak: {$jarakTeks} | Harga: {$hargaMulai} | Alamat: {$f->address}";
             })->implode("\n");
 
         } catch (\Exception $e) {
@@ -195,14 +221,14 @@ class GeminiService
             $formattedTime = Carbon::parse($time)->format('H:i:s');
             $dayOfWeek = Carbon::parse($date)->format('l');
 
-            // 1. Ambil lapangan yang buka pada hari dan jam tersebut
             $fields = Field::whereHas('prices', function($q) use ($dayOfWeek, $formattedTime) {
                 $q->where('day_of_week', $dayOfWeek)
                   ->where('start_time', '<=', $formattedTime)
                   ->where('end_time', '>', $formattedTime);
-            })->get();
+            })->with(['prices' => function($q) use ($dayOfWeek) {
+                $q->where('day_of_week', $dayOfWeek);
+            }])->get();
 
-            // 2. PERBAIKAN: Cek manual menggunakan tabel BookingItem langsung agar aman dari relasi model yang hilang
             $availableFields = $fields->filter(function($field) use ($date, $formattedTime) {
                 $isBooked = BookingItem::where('start_time', $formattedTime)
                     ->whereHas('booking', function($b) use ($field, $date) {
@@ -211,18 +237,69 @@ class GeminiService
                           ->whereIn('status', ['pending', 'dp_paid', 'paid']);
                     })->exists();
 
-                return !$isBooked; // Loloskan jika BELUM di-booking
-            })->take(2);
+                return !$isBooked; 
+            })->take(3);
 
             if ($availableFields->isEmpty()) {
                 return "Maaf, semua lapangan sudah penuh di tanggal $date jam $time.";
             }
 
-            return $availableFields->map(fn($f) => "- {$f->name} ({$f->type}), Lokasi: {$f->address}")->implode("\n");
+            return $availableFields->map(function($f) use ($formattedTime) {
+                $hargaSesi = $f->prices->firstWhere(function($p) use ($formattedTime) {
+                    return $p->start_time <= $formattedTime && $p->end_time > $formattedTime;
+                });
+                $hargaTeks = $hargaSesi ? "Rp " . number_format($hargaSesi->price, 0, ',', '.') : "Belum ditentukan";
+                
+                return "- {$f->name} ({$f->type}) | Harga/Jam: {$hargaTeks} | Lokasi: {$f->address}";
+            })->implode("\n");
 
         } catch (\Exception $e) {
             Log::error('Error getAvailableFieldsByTime: ' . $e->getMessage());
             return "Terjadi kendala saat mengecek jadwal database.";
+        }
+    }
+
+    private function getFieldPrices($fieldName = null, $maxPrice = null)
+    {
+        try {
+            $query = Field::with('prices');
+
+            if (!empty($fieldName)) {
+                $query->where('name', 'LIKE', '%' . $fieldName . '%');
+            }
+
+            $fields = $query->get();
+
+            if (!empty($maxPrice)) {
+                $maxPrice = (float) $maxPrice;
+                $fields = $fields->filter(function ($field) use ($maxPrice) {
+                    $minPrice = $field->prices->min('price');
+                    return $minPrice !== null && $minPrice <= $maxPrice;
+                });
+            }
+
+            if ($fields->isEmpty()) {
+                return "Maaf, tidak ada data lapangan yang sesuai dengan kriteria nama atau harga tersebut.";
+            }
+
+            return $fields->take(5)->map(function($f) {
+                $minPrice = $f->prices->min('price');
+                $maxPrice = $f->prices->max('price');
+                
+                if (!$minPrice) {
+                    $hargaTeks = "Harga belum diatur di sistem";
+                } elseif ($minPrice == $maxPrice) {
+                    $hargaTeks = "Rp " . number_format($minPrice, 0, ',', '.');
+                } else {
+                    $hargaTeks = "Rp " . number_format($minPrice, 0, ',', '.') . " - Rp " . number_format($maxPrice, 0, ',', '.');
+                }
+
+                return "- {$f->name} ({$f->type}): Harga berkisar {$hargaTeks}/jam. Alamat: {$f->address}";
+            })->implode("\n");
+
+        } catch (\Exception $e) {
+            Log::error('Error getFieldPrices: ' . $e->getMessage());
+            return "Maaf, sistem sedang kesulitan mengambil data harga dari database.";
         }
     }
 }
