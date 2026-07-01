@@ -12,7 +12,6 @@ use Livewire\Component;
 use Livewire\Attributes\Computed;
 use Midtrans\Config;
 use Midtrans\Snap;
-use Exception;
 
 class Checkout extends Component
 {
@@ -86,28 +85,55 @@ class Checkout extends Component
         $this->calculateTotal();
     }
 
+    // === PERBAIKAN: LOGIKA VALIDASI PROMO DI WEB ===
     public function applyPromo()
     {
-        // Pastikan input promo berupa string (karena bisa terkirim null dari Alpine.js)
-        $this->promoCode = (string) $this->promoCode;
+        $promo = Promo::where('code', $this->promoCode)->first();
 
-        if (empty($this->promoCode)) {
+        if (!$promo) {
             $this->appliedPromo = null;
+            session()->flash('error_promo', 'Kode promo tidak ditemukan.');
             $this->calculateTotal();
             return;
         }
 
-        $promo = Promo::where('code', $this->promoCode)
-            ->whereDate('valid_until', '>=', Carbon::today())
-            ->first();
-
-        if ($promo) {
-            $this->appliedPromo = $promo;
-            session()->flash('success_promo', 'Promo berhasil digunakan!');
-        } else {
+        // 1. Cek Batas Waktu
+        if (Carbon::now()->startOfDay()->gt(Carbon::parse($promo->valid_until)->endOfDay())) {
             $this->appliedPromo = null;
-            session()->flash('error_promo', 'Kode promo tidak valid atau kadaluarsa.');
+            session()->flash('error_promo', 'Maaf, masa berlaku kode promo ini sudah habis.');
+            $this->calculateTotal();
+            return;
         }
+
+        // 2. Cek apakah CUSTOMER INI sudah pernah memakai promo ini
+        $hasUsedPromo = Booking::where('user_id', auth()->id())
+            ->where('promo_id', $promo->id)
+            ->where('status', '!=', 'cancelled')
+            ->exists();
+
+        if ($hasUsedPromo) {
+            $this->appliedPromo = null;
+            session()->flash('error_promo', 'Anda sudah pernah menggunakan kode promo ini.');
+            $this->calculateTotal();
+            return;
+        }
+
+        // 3. Cek apakah BATAS MAKSIMAL (max_uses) GLOBAL sudah terpenuhi
+        $totalUsage = Booking::where('promo_id', $promo->id)
+            ->where('status', '!=', 'cancelled')
+            ->count();
+
+        if ($totalUsage >= $promo->max_uses) {
+            $this->appliedPromo = null;
+            session()->flash('error_promo', 'Maaf, kuota penggunaan kode promo ini sudah habis.');
+            $this->calculateTotal();
+            return;
+        }
+
+        // Jika lolos semua validasi
+        $this->appliedPromo = $promo;
+        session()->flash('success_promo', 'Promo berhasil digunakan!');
+        
         $this->calculateTotal();
     }
 
@@ -133,13 +159,13 @@ class Checkout extends Component
 
         $afterDiscount = max(0, $this->subtotal - $this->discountAmount);
         
-        // === PERBAIKAN 1: PPN 11% (Dibulatkan ke atas agar tidak ada masalah koma desimal)
+        // PPN 11% (Dibulatkan ke atas)
         $this->ppnAmount = ceil($afterDiscount * 0.11);
         $this->grandTotal = $afterDiscount + $this->ppnAmount;
 
-        // KALKULASI MINIMAL DP MENGIKUTI ATURAN BARIS LAPANGAN
+        // Kalkulasi Minimal DP
         $minDpPercent = (float) ($this->field->min_dp_percent ?? 50.00);
-        $this->dpAmount = ceil($this->grandTotal * ($minDpPercent / 100)); // Dibulatkan ke atas juga
+        $this->dpAmount = ceil($this->grandTotal * ($minDpPercent / 100));
     }
 
     public function processPayment()
@@ -151,14 +177,38 @@ class Checkout extends Component
         ], [
             'selectedTimes.required' => 'Pilih minimal 1 jam bermain.',
         ]);
+        
+        if (!empty($this->promoCode) && empty($this->appliedPromo)) {
+            session()->flash('error_promo', 'Silakan batalkan/hapus voucher yang tidak valid sebelum membayar.');
+            return; // Hentikan proses!
+        }
 
-        // Recalculate untuk memastikan data aman sebelum dikirim ke payment gateway
+        // === DOUBLE CHECK PROMO SEBELUM CHECKOUT ===
+        // Mencegah pelanggan yang mendiamkan halaman web terlalu lama
+        if ($this->appliedPromo) {
+            $hasUsedPromo = Booking::where('user_id', auth()->id())
+                ->where('promo_id', $this->appliedPromo->id)
+                ->where('status', '!=', 'cancelled')
+                ->exists();
+
+            $totalUsage = Booking::where('promo_id', $this->appliedPromo->id)
+                ->where('status', '!=', 'cancelled')
+                ->count();
+
+            if ($hasUsedPromo || $totalUsage >= $this->appliedPromo->max_uses) {
+                $this->appliedPromo = null;
+                $this->calculateTotal();
+                session()->flash('error_promo', 'Gagal memproses: Kuota promo baru saja habis atau sudah Anda gunakan.');
+                return; // Batalkan proses checkout
+            }
+        }
+
         $this->calculateTotal();
 
         // Nominal dinamis yang akan ditagihkan ke Midtrans
         $amountToPay = $this->paymentType === 'dp' ? $this->dpAmount : $this->grandTotal;
 
-        // === PERBAIKAN 2: Gunakan \DB::beginTransaction() untuk melindungi data gantung
+        // Amankan database menggunakan Transaction system
         \DB::beginTransaction();
 
         try {
@@ -171,7 +221,6 @@ class Checkout extends Component
                 'booking_date' => $this->bookingDate,
                 'subtotal' => $this->subtotal,
                 'discount' => $this->discountAmount,
-                'tax' => $this->ppnAmount, // PENTING: Tambahkan ini jika di tabelmu ada kolom tax (sebaiknya ada)
                 'grand_total' => $this->grandTotal,
                 'paid_amount' => 0,
                 'payment_type' => $this->paymentType,
@@ -195,10 +244,18 @@ class Checkout extends Component
             Config::$isSanitized = true;
             Config::$is3ds = true;
 
+            // === PERBAIKAN CRITICAL TIMEOUT ===
+            // Mengubah timeout menjadi 30 detik untuk menghindari error jaringan
+            Config::$curlOptions = [
+                CURLOPT_CONNECTTIMEOUT => 30, // Batas waktu bersalaman
+                CURLOPT_TIMEOUT => 30,        // Batas waktu tunggu respon
+                CURLOPT_HTTPHEADER => []      
+            ];
+
             $params = [
                 'transaction_details' => [
                     'order_id' => $booking->booking_code,
-                    'gross_amount' => (int) round($amountToPay), // Pastikan menjadi Integer murni
+                    'gross_amount' => (int) round($amountToPay), // Konversi wajib tipe Integer murni
                 ],
                 'customer_details' => [
                     'first_name' => auth()->user()->name,
@@ -207,24 +264,23 @@ class Checkout extends Component
                 ]
             ];
 
-            // MENGGUNAKAN SNAP REDIRECT
+            // 4. Buat Transaksi ke Midtrans
             $paymentUrl = Snap::createTransaction($params)->redirect_url;
             
             $booking->update(['midtrans_snap_token' => $paymentUrl]);
 
-            // Jika Midtrans berhasil, kunci data di database
+            // Jika sampai tahap ini sukses, kunci penyimpanan database
             \DB::commit();
 
-            // Alihkan pelanggan langsung ke halaman aman instan Midtrans
-            return redirect()->to($paymentUrl);
+            // Alihkan pelanggan ke portal pembayaran Midtrans
+            return redirect()->away($paymentUrl);
             
-        } catch (Exception $e) {
-            // Jika GAGAL, hapus data pesanan dari database (Rollback) agar tidak menumpuk
+        } catch (\Throwable $e) { 
+            // Batalkan semua penyimpanan database jika di pertengahan ada yang gagal
             \DB::rollBack();
             
-            // Tampilkan pesan error di layar pengguna (bukan halaman blank)
-            session()->flash('error_payment', 'Gagal terhubung dengan sistem pembayaran: ' . $e->getMessage());
-            return;
+            // Tampilkan detail kegagalan murni ke layar agar bisa kita baca masalahnya
+            dd('ERROR FATAL DITEMUKAN: ' . $e->getMessage() . ' | DI BARIS: ' . $e->getLine());
         }
     }
 

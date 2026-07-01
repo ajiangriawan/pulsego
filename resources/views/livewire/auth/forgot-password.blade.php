@@ -1,31 +1,3 @@
-<?php
-
-use Illuminate\Support\Facades\Password;
-use Livewire\Attributes\Layout;
-use Livewire\Volt\Component;
-
-new #[Layout('layouts.guest')] class extends Component
-{
-    public string $email = '';
-
-    public function sendPasswordResetLink(): void
-    {
-        $this->validate([
-            'email' => ['required', 'string', 'email'],
-        ]);
-
-        $status = Password::sendResetLink($this->only('email'));
-
-        if ($status != Password::RESET_LINK_SENT) {
-            $this->addError('email', __($status));
-            return;
-        }
-
-        $this->reset('email');
-        session()->flash('status', __($status));
-    }
-}; ?>
-
 <div>
     {{-- Header --}}
     <div class="px-8 pt-8 pb-6" style="background: linear-gradient(135deg, #1E6B2A, #3A9E3F);">
@@ -60,7 +32,8 @@ new #[Layout('layouts.guest')] class extends Component
             </div>
         @endif
 
-        <form wire:submit="sendPasswordResetLink" class="space-y-5">
+        {{-- Gunakan wire:submit saja untuk Livewire v3 (tidak perlu .prevent) --}}
+        <form wire:submit="sendResetLink" class="space-y-5">
 
             {{-- Email --}}
             <div>
@@ -79,7 +52,11 @@ new #[Layout('layouts.guest')] class extends Component
                            placeholder="nama@email.com"
                            class="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 text-sm font-medium text-gray-800 placeholder-gray-400 focus:border-green-500 focus:ring-0 transition-colors outline-none">
                 </div>
-                <x-input-error :messages="$errors->get('email')" class="mt-1.5" />
+                
+                {{-- Diubah menjadi directive @error agar lebih aman dan tidak error --}}
+                @error('email')
+                    <span class="text-red-500 text-xs font-semibold mt-1.5 block">{{ $message }}</span>
+                @enderror
             </div>
 
             {{-- Submit --}}
@@ -87,13 +64,17 @@ new #[Layout('layouts.guest')] class extends Component
                     wire:loading.attr="disabled"
                     class="w-full py-3.5 rounded-2xl text-white font-extrabold text-sm transition-all flex items-center justify-center gap-2"
                     style="background: linear-gradient(135deg, #3A9E3F, #6DBE4E); box-shadow: 0 6px 20px rgba(58,158,63,0.4);">
-                <span wire:loading.remove wire:target="sendPasswordResetLink" class="flex items-center gap-2">
+                
+                {{-- wire:target disesuaikan dengan nama fungsi di PHP --}}
+                <span wire:loading.remove wire:target="sendResetLink" class="flex items-center gap-2">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
                     </svg>
                     Kirim Link Reset Password
                 </span>
-                <span wire:loading wire:target="sendPasswordResetLink" class="flex items-center gap-2">
+                
+                {{-- wire:target disesuaikan dengan nama fungsi di PHP --}}
+                <span wire:loading wire:target="sendResetLink" class="flex items-center gap-2">
                     <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>

@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-gray-100">
+<div class="min-h-screen bg-gray-100" x-data="{ showPromoModal: false }">
 
     {{-- ===== TOP HEADER BAR ===== --}}
     <div class="sticky top-0 z-30" style="background: linear-gradient(135deg, #1E6B2A, #3A9E3F);">
@@ -139,7 +139,8 @@
                                     <div class="text-[10px] text-gray-400 mb-1">– {{ $time['end'] }}</div>
                                     @if($time['is_booked'])
                                         <div class="text-[10px] font-bold text-gray-400 bg-gray-100 rounded-md px-1.5 py-0.5">Terisi</div>
-                                    @else
+                                    @endif
+                                    @if(!$time['is_booked'])
                                         <div class="text-[10px] font-bold text-green-600">
                                             Rp {{ number_format($time['price'], 0, ',', '.') }}
                                         </div>
@@ -170,7 +171,9 @@
 
                     {{-- Header --}}
                     <div class="px-5 py-4 border-b border-gray-100">
-                        <h2 class="font-extrabold text-gray-900">Ringkasan Pembayaran</h2>
+                        <div class="flex items-center justify-between">
+                            <h2 class="font-extrabold text-gray-900">Ringkasan Pembayaran</h2>
+                        </div>
                     </div>
 
                     <div class="p-5 space-y-4">
@@ -182,25 +185,35 @@
                                 <span class="font-bold text-gray-900">Rp {{ number_format($subtotal, 0, ',', '.') }}</span>
                             </div>
 
-                            {{-- Promo --}}
-                            <div class="flex gap-2">
-                                <input type="text"
-                                       wire:model="promoCode"
-                                       placeholder="Kode promo"
-                                       class="flex-1 text-sm rounded-xl border-2 border-gray-200 px-3 py-2 font-medium focus:border-green-500 focus:ring-0 transition-colors">
-                                <button wire:click="applyPromo"
-                                        class="text-white text-xs font-bold px-3 py-2 rounded-xl transition"
-                                        style="background: linear-gradient(135deg, #3A9E3F, #6DBE4E);">
-                                    Pakai
+                            {{-- ===== TOMBOL PEMICU MODAL PROMO ===== --}}
+                            <div class="pt-1">
+                                <button type="button" @click="showPromoModal = true" 
+                                        class="w-full flex items-center justify-between border-2 border-dashed border-green-300 bg-green-50/40 rounded-xl p-3 hover:bg-green-50 transition group text-left">
+                                    <div class="flex items-center gap-2.5">
+                                        <span class="text-xl group-hover:scale-110 transition-transform">🎟️</span>
+                                        <div>
+                                            <p class="text-xs font-bold text-gray-800">Makin hemat pakai promo!</p>
+                                            @if(!empty($promoCode))
+                                                <p class="text-[11px] text-green-600 font-bold mt-0.5">Voucher aktif: <span class="underline">{{ $promoCode }}</span></p>
+                                            @else
+                                                <p class="text-[11px] text-gray-400 mt-0.5">Ketuk untuk memilih voucher diskon</p>
+                                            @endif
+                                        </div>
+                                    </div>
+                                    <svg class="w-4 h-4 text-green-500 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                                    </svg>
                                 </button>
                             </div>
 
+                            {{-- Session Feedback System --}}
                             @if(session()->has('success_promo'))
-                                <p class="text-xs font-semibold text-green-600 flex items-center gap-1">✓ {{ session('success_promo') }}</p>
+                                <p class="text-xs font-semibold text-green-600 flex items-center gap-1 bg-green-50 p-2 rounded-lg">✓ {{ session('success_promo') }}</p>
                             @endif
                             @if(session()->has('error_promo'))
-                                <p class="text-xs font-semibold text-red-500 flex items-center gap-1">✗ {{ session('error_promo') }}</p>
+                                <p class="text-xs font-semibold text-red-500 flex items-center gap-1 bg-red-50 p-2 rounded-lg">✗ {{ session('error_promo') }}</p>
                             @endif
+                            {{-- =========================================== --}}
 
                             @if($discountAmount > 0)
                                 <div class="flex justify-between text-sm">
@@ -231,7 +244,7 @@
                                     <div class="rounded-xl border-2 p-3.5 transition-all bg-white border-gray-200 hover:border-green-300 peer-checked:border-green-600 peer-checked:bg-green-50">
                                         <div class="flex justify-between items-center">
                                             <div class="flex items-center gap-3">
-                                                <div class="w-4 h-4 rounded-full border-2 border-gray-300 peer-checked:border-green-600 flex items-center justify-center flex-shrink-0
+                                                <div class="w-4 h-4 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0
                                                     [.peer:checked~div>&]:border-green-600">
                                                     <div class="w-2 h-2 rounded-full bg-green-600 hidden peer-checked:block"></div>
                                                 </div>
@@ -252,11 +265,17 @@
                                     <input type="radio" wire:model.live="paymentType" value="dp" class="peer hidden">
                                     <div class="rounded-xl border-2 p-3.5 transition-all bg-white border-gray-200 hover:border-green-300 peer-checked:border-green-600 peer-checked:bg-green-50">
                                         <div class="flex justify-between items-center">
-                                            <div>
-                                                <p class="font-bold text-gray-900 text-sm">Bayar DP</p>
-                                                <p class="text-[10px] text-red-500 font-semibold">
-                                                    Sisa Rp {{ number_format($grandTotal - $dpAmount, 0, ',', '.') }} di tempat
-                                                </p>
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-4 h-4 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0
+                                                    [.peer:checked~div>&]:border-green-600">
+                                                    <div class="w-2 h-2 rounded-full bg-green-600 hidden peer-checked:block"></div>
+                                                </div>
+                                                <div>
+                                                    <p class="font-bold text-gray-900 text-sm">Bayar DP</p>
+                                                    <p class="text-[10px] text-red-500 font-semibold">
+                                                        Sisa Rp {{ number_format(max(0, $grandTotal - $dpAmount), 0, ',', '.') }} di tempat
+                                                    </p>
+                                                </div>
                                             </div>
                                             <span class="font-extrabold text-sm" style="color: #3A9E3F;">
                                                 Rp {{ number_format($dpAmount, 0, ',', '.') }}
@@ -291,16 +310,29 @@
                         </div>
 
                         {{-- CTA --}}
+                        @php
+                            // Cek apakah ada promo yang dipilih tapi statusnya invalid
+                            $isPromoError = !empty($promoCode) && empty($appliedPromo);
+                        @endphp
+                        
                         <button wire:click="processPayment"
                                 wire:loading.attr="disabled"
-                                class="w-full py-4 rounded-2xl text-white font-extrabold text-sm transition-all flex justify-center items-center gap-2"
-                                style="background: linear-gradient(135deg, #3A9E3F, #6DBE4E); box-shadow: 0 6px 20px rgba(58,158,63,0.4);">
+                                @if($isPromoError) disabled @endif
+                                class="w-full py-4 rounded-2xl text-white font-extrabold text-sm transition-all flex justify-center items-center gap-2 {{ $isPromoError ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                style="{{ $isPromoError ? 'background: #9CA3AF;' : 'background: linear-gradient(135deg, #3A9E3F, #6DBE4E); box-shadow: 0 6px 20px rgba(58,158,63,0.4);' }}">
+                            
                             <span wire:loading.remove wire:target="processPayment" class="flex items-center gap-2">
-                                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Lanjutkan Pembayaran
+                                @if($isPromoError)
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                    Hapus Promo Dulu
+                                @else
+                                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Lanjutkan Pembayaran
+                                @endif
                             </span>
+                            
                             <span wire:loading wire:target="processPayment" class="flex items-center gap-2">
                                 <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -316,4 +348,88 @@
 
         </div>
     </div>
+
+    {{-- ==========================================================
+        MODAL PILIH VOUCHER (POP-UP DAFTAR PROMO)
+        ========================================================== --}}
+    <div x-show="showPromoModal" 
+         class="fixed inset-0 z-50 overflow-y-auto flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         style="display: none;">
+         
+        {{-- Click Outside Target --}}
+        <div class="fixed inset-0" @click="showPromoModal = false"></div>
+
+        {{-- Jendela Sheet/Modal --}}
+        <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-2xl overflow-hidden shadow-2xl relative z-10 transform transition-all"
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="translate-y-full sm:translate-y-4 sm:scale-95"
+             x-transition:enter-end="translate-y-0 sm:scale-100"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="translate-y-0 sm:scale-100"
+             x-transition:leave-end="translate-y-full sm:translate-y-4 sm:scale-95">
+             
+            {{-- Header Modal --}}
+            <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                <h3 class="font-extrabold text-gray-900 text-lg">Pilih Voucher Diskon</h3>
+                <button type="button" @click="showPromoModal = false" class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-300 transition">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            {{-- Isi Modal List Promo --}}
+            <div class="p-6 max-h-[400px] overflow-y-auto space-y-3">
+                @php
+                    $activePromos = \App\Models\Promo::whereDate('valid_until', '>=', \Carbon\Carbon::today())->get();
+                @endphp
+
+                @forelse($activePromos as $promo)
+                    @php 
+                        $isSelected = ($promoCode === $promo->code); 
+                    @endphp
+                    
+                    {{-- DI SINI PERBAIKANNYA: Menggunakan $wire.set() --}}
+                    <div @click="$wire.set('promoCode', '{{ $isSelected ? '' : $promo->code }}'); $wire.applyPromo(); showPromoModal = false;"
+                         class="flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 group
+                                {{ $isSelected ? 'border-green-500 bg-green-50' : 'border-gray-100 bg-white hover:border-green-200 hover:bg-green-50/30' }}">
+                        
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors
+                                        {{ $isSelected ? 'bg-green-500 text-white' : 'bg-green-100 text-green-600' }}">
+                                🎟️
+                            </div>
+                            <div>
+                                <h4 class="font-black text-gray-900 group-hover:text-green-700 transition-colors">{{ $promo->code }}</h4>
+                                <p class="text-xs text-gray-500 font-semibold mt-0.5">
+                                    Potongan {{ $promo->discount_type === 'percent' ? $promo->discount_amount.'%' : 'Rp '.number_format($promo->discount_amount, 0, ',', '.') }}
+                                </p>
+                            </div>
+                        </div>
+
+                        {{-- Checkmark Circle Indicator --}}
+                        <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all
+                                    {{ $isSelected ? 'border-green-500 bg-green-500 text-white' : 'border-gray-300' }}">
+                            @if($isSelected)
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                            @endif
+                        </div>
+                    </div>
+                @empty
+                    <div class="text-center py-8 text-gray-400">
+                        <p class="text-4xl mb-2">🎁</p>
+                        <p class="text-sm font-semibold">Belum ada voucher tersedia saat ini.</p>
+                    </div>
+                @endforelse
+            </div>
+            
+        </div>
+    </div>
+
 </div>

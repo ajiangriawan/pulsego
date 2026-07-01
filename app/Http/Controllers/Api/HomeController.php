@@ -396,11 +396,47 @@ class HomeController extends Controller
         $subtotal = $request->subtotal;
         $discountAmount = 0;
 
-        // === PERHITUNGAN DISKON ===
+        // === PERHITUNGAN DISKON & VALIDASI PROMO ===
         // Cek jika user mengirimkan promo_id dan promo tersebut valid
         if ($request->filled('promo_id')) {
             $promo = \App\Models\Promo::find($request->promo_id);
+            
             if ($promo) {
+                // 1. Cek apakah BATAS WAKTU promo sudah lewat
+                if (\Carbon\Carbon::now()->startOfDay()->gt(\Carbon\Carbon::parse($promo->valid_until)->endOfDay())) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Maaf, masa berlaku kode promo ini sudah habis.'
+                    ], 400);
+                }
+
+                // 2. Cek apakah CUSTOMER INI sudah pernah memakai promo ini
+                // (Kita kecualikan status 'cancelled' agar promo bisa dipakai lagi jika sebelumnya batal)
+                $hasUsedPromo = \App\Models\Booking::where('user_id', $user->id)
+                    ->where('promo_id', $promo->id)
+                    ->where('status', '!=', 'cancelled')
+                    ->exists();
+
+                if ($hasUsedPromo) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Anda sudah pernah menggunakan kode promo ini.'
+                    ], 400);
+                }
+
+                // 3. Cek apakah BATAS MAKSIMAL (max_uses) GLOBAL sudah terpenuhi
+                $totalUsage = \App\Models\Booking::where('promo_id', $promo->id)
+                    ->where('status', '!=', 'cancelled')
+                    ->count();
+
+                if ($totalUsage >= $promo->max_uses) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Maaf, kuota penggunaan kode promo ini sudah habis dipakai orang lain.'
+                    ], 400);
+                }
+
+                // 4. Jika semua validasi lolos, hitung diskonnya
                 if ($promo->discount_type === 'percent') {
                     $discountAmount = $subtotal * ($promo->discount_amount / 100);
                 } else {
@@ -455,6 +491,12 @@ class HomeController extends Controller
         \Midtrans\Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
         \Midtrans\Config::$isSanitized = true;
         \Midtrans\Config::$is3ds = true;
+        
+        // PENCEGAHAN ERROR TIMEOUT CURL
+        \Midtrans\Config::$curlOptions = [
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_TIMEOUT => 30,
+        ];
 
         $params = [
             'transaction_details' => [

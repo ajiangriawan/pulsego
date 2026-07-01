@@ -10,7 +10,7 @@ use App\Livewire\BookingHistory;
 use App\Http\Controllers\MidtransController;
 use App\Livewire\BookingHistoryPayment;
 use App\Livewire\FieldList;
-use App\Http\Controllers\Api\AuthController;
+use App\Livewire\Auth\ForgotPassword;
 
 Route::get('/', Home::class)->name('home');
 
@@ -42,12 +42,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/history', BookingHistory::class)->name('booking.history');
     Route::get('/history-payment', BookingHistoryPayment::class)->name('booking.history.payment');
     Route::get('/field-list', FieldList::class)->name('field');
-    
 });
 
 Route::post('/midtrans/callback', [MidtransController::class, 'callback'])->name('midtrans.callback');
 
-Route::get('/reset-password/{token}', [AuthController::class, 'showResetForm'])->name('password.reset');
-Route::post('/reset-password', [AuthController::class, 'resetPassword'])->name('password.update');
+Route::get('/forgot-password', ForgotPassword::class)->name('password.request');
+
+Route::get('/reset-password/{token}', \App\Livewire\Auth\ResetPassword::class)->name('password.reset');
 
 require __DIR__ . '/auth.php';
