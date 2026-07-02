@@ -30,7 +30,7 @@ class HomeController extends Controller
             $query->latest();
         }
 
-        // Ambil maksimal 2 data lapangan
+        // Ambil maksimal 5 data lapangan
         $fields = $query->take(2)->get()->map(function ($field) use ($lat, $lng) {
             $price = $field->prices->first() ? $field->prices->first()->price : 0;
 
@@ -52,42 +52,17 @@ class HomeController extends Controller
                 'image_url' => $field->getFirstMediaUrl('gallery') ?: null,
                 'price_formatted' => number_format($price, 0, ',', '.'),
                 'rating' => '4.8',
+
+                // KUNCI UTAMA: Mengirimkan teks jarak hasil hitungan ke React Native
                 'distance' => $distanceText
             ];
         });
 
-        // =========================================================
-        // LOGIKA BARU: NOTIFIKASI UNTUK USER YANG SEDANG LOGIN
-        // =========================================================
-        $user = auth('sanctum')->user(); // Cek user menggunakan token API
-        $gameToday = null;
-        $recentBookings = [];
-
-        if ($user) {
-            $today = \Carbon\Carbon::today()->format('Y-m-d');
-            
-            // Cek jadwal main hari ini
-            $gameToday = \App\Models\Booking::where('user_id', $user->id)
-                ->whereDate('booking_date', $today)
-                ->whereIn('status', ['paid', 'dp_paid'])
-                ->with('field') // Ambil relasi field untuk mendapatkan nama lapangan
-                ->first();
-
-            // Ambil 5 riwayat pesanan terakhir
-            $recentBookings = \App\Models\Booking::where('user_id', $user->id)
-                ->orderBy('created_at', 'desc')
-                ->take(5)
-                ->get();
-        }
-
-        // 4. Kembalikan semua data ke React Native
         return response()->json([
             'success' => true,
             'message' => 'Data beranda berhasil diambil',
             'data' => [
-                'popular_fields' => $fields,
-                'game_today' => $gameToday,             // <-- Dikirim ke aplikasi
-                'recent_bookings' => $recentBookings    // <-- Dikirim ke aplikasi
+                'popular_fields' => $fields
             ]
         ], 200);
     }
@@ -318,6 +293,11 @@ class HomeController extends Controller
                 'first_name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone ?? '081111111111',
+            ],
+            'callbacks' => [
+                'finish' => 'pulsego://history',
+                'error' => 'pulsego://history',
+                'pending' => 'pulsego://history'
             ]
         ];
 
@@ -383,24 +363,22 @@ class HomeController extends Controller
     {
         $user = $request->user();
 
-        // Validasi data yang dikirim dari HP (Tambahkan validasi promo_id)
+        // Validasi data yang dikirim dari HP
         $request->validate([
             'field_id' => 'required|exists:fields,id',
             'booking_date' => 'required|date',
             'payment_type' => 'required|in:full,dp',
             'subtotal' => 'required|numeric',
-            'items' => 'required|array', // Array jadwal yang dipilih
-            'promo_id' => 'nullable|exists:promos,id', // Validasi promo jika ada
+            'items' => 'required|array',
+            'promo_id' => 'nullable|exists:promos,id',
         ]);
 
         $subtotal = $request->subtotal;
         $discountAmount = 0;
 
         // === PERHITUNGAN DISKON & VALIDASI PROMO ===
-        // Cek jika user mengirimkan promo_id dan promo tersebut valid
         if ($request->filled('promo_id')) {
             $promo = \App\Models\Promo::find($request->promo_id);
-            
             if ($promo) {
                 // 1. Cek apakah BATAS WAKTU promo sudah lewat
                 if (\Carbon\Carbon::now()->startOfDay()->gt(\Carbon\Carbon::parse($promo->valid_until)->endOfDay())) {
@@ -411,7 +389,6 @@ class HomeController extends Controller
                 }
 
                 // 2. Cek apakah CUSTOMER INI sudah pernah memakai promo ini
-                // (Kita kecualikan status 'cancelled' agar promo bisa dipakai lagi jika sebelumnya batal)
                 $hasUsedPromo = \App\Models\Booking::where('user_id', $user->id)
                     ->where('promo_id', $promo->id)
                     ->where('status', '!=', 'cancelled')
@@ -432,11 +409,11 @@ class HomeController extends Controller
                 if ($totalUsage >= $promo->max_uses) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Maaf, kuota penggunaan kode promo ini sudah habis dipakai orang lain.'
+                        'message' => 'Maaf, kuota penggunaan kode promo ini sudah habis.'
                     ], 400);
                 }
 
-                // 4. Jika semua validasi lolos, hitung diskonnya
+                // 4. Jika lolos semua validasi, hitung diskon
                 if ($promo->discount_type === 'percent') {
                     $discountAmount = $subtotal * ($promo->discount_amount / 100);
                 } else {
@@ -454,68 +431,76 @@ class HomeController extends Controller
 
         // === TARIK PERSENTASE DP DARI DATABASE ===
         $field = \App\Models\Field::findOrFail($request->field_id);
-        $dpPercent = (float) ($field->min_dp_percent ?? 50.00); // Default 50% jika kosong
+        $dpPercent = (float) ($field->min_dp_percent ?? 50.00);
 
-        // Tentukan jumlah yang harus dibayar sekarang (Full 100% atau DP sesuai persen)
+        // Tentukan jumlah yang harus dibayar sekarang
         $grossAmount = $request->payment_type === 'dp' ? ($grandTotal * ($dpPercent / 100)) : $grandTotal;
 
         // Buat ID Booking Unik
         $bookingCode = 'PLS-' . date('dmy') . '-' . strtoupper(\Illuminate\Support\Str::random(4));
 
-        // 1. Simpan Data ke Tabel Bookings
-        $booking = \App\Models\Booking::create([
-            'user_id' => $user->id,
-            'field_id' => $request->field_id,
-            'promo_id' => $request->promo_id, // Simpan ID Promo (Bisa null)
-            'booking_code' => $bookingCode,
-            'booking_date' => $request->booking_date,
-            'subtotal' => $subtotal,
-            'discount' => $discountAmount, // Simpan Nominal Diskon
-            'tax' => $tax,
-            'grand_total' => $grandTotal,
-            'payment_type' => $request->payment_type,
-            'status' => 'pending', // Status awal
-        ]);
-
-        // 2. Simpan Detail Jam Bermain ke Tabel Items
-        foreach ($request->items as $item) {
-            $booking->items()->create([
-                'start_time' => $item['start_time'],
-                'end_time' => $item['end_time'],
-                'price' => $item['price']
-            ]);
-        }
-
-        // === KONFIGURASI MIDTRANS ===
-        \Midtrans\Config::$serverKey = env('MIDTRANS_SERVER_KEY');
-        \Midtrans\Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
-        \Midtrans\Config::$isSanitized = true;
-        \Midtrans\Config::$is3ds = true;
-        
-        // PENCEGAHAN ERROR TIMEOUT CURL
-        \Midtrans\Config::$curlOptions = [
-            CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_TIMEOUT => 30,
-        ];
-
-        $params = [
-            'transaction_details' => [
-                'order_id' => $bookingCode,
-                'gross_amount' => round($grossAmount), // Midtrans membutuhkan angka bulat
-            ],
-            'customer_details' => [
-                'first_name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '081111111111',
-            ]
-        ];
+        // Amankan database menggunakan Transaction system
+        \DB::beginTransaction();
 
         try {
+            // 1. Simpan Data ke Tabel Bookings
+            $booking = \App\Models\Booking::create([
+                'user_id' => $user->id,
+                'field_id' => $request->field_id,
+                'promo_id' => $request->promo_id,
+                'booking_code' => $bookingCode,
+                'booking_date' => $request->booking_date,
+                'subtotal' => $subtotal,
+                'discount' => $discountAmount,
+                'tax' => $tax,
+                'grand_total' => $grandTotal,
+                'payment_type' => $request->payment_type,
+                'status' => 'pending',
+            ]);
+
+            // 2. Simpan Detail Jam Bermain ke Tabel Items
+            foreach ($request->items as $item) {
+                $booking->items()->create([
+                    'start_time' => $item['start_time'],
+                    'end_time' => $item['end_time'],
+                    'price' => $item['price']
+                ]);
+            }
+
+            // === KONFIGURASI MIDTRANS ===
+            \Midtrans\Config::$serverKey = env('MIDTRANS_SERVER_KEY');
+            \Midtrans\Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
+            \Midtrans\Config::$isSanitized = true;
+            \Midtrans\Config::$is3ds = true;
+
+            // Penyesuaian Jaringan (Memaksa IPv4 untuk Server Arenhost + Tambalan Bug Midtrans PHP 8)
+            \Midtrans\Config::$curlOptions = [
+                CURLOPT_CONNECTTIMEOUT => 30,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                CURLOPT_HTTPHEADER => [], // <--- INI OBAT PENAWARNYA! (Key 10023)
+            ];
+
+            $params = [
+                'transaction_details' => [
+                    'order_id' => $bookingCode,
+                    'gross_amount' => round($grossAmount),
+                ],
+                'customer_details' => [
+                    'first_name' => $user->name,
+                    'email' => $user->email,
+                    'phone' => $user->phone ?? '081111111111',
+                ]
+            ];
+
             // Dapatkan URL Pembayaran dari Midtrans
             $paymentUrl = \Midtrans\Snap::createTransaction($params)->redirect_url;
 
             // Simpan link ke database
             $booking->update(['midtrans_snap_token' => $paymentUrl]);
+
+            // Kunci data di database
+            \DB::commit();
 
             return response()->json([
                 'success' => true,
@@ -523,8 +508,8 @@ class HomeController extends Controller
                 'payment_url' => $paymentUrl
             ]);
         } catch (\Exception $e) {
-            // Jika Midtrans gagal, hapus booking yang terlanjur dibuat agar tidak jadi data sampah
-            $booking->delete();
+            // Batalkan semua query jika di tengah jalan Midtrans atau sistem error
+            \DB::rollBack();
 
             return response()->json([
                 'success' => false,
