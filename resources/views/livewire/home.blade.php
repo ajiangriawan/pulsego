@@ -110,7 +110,7 @@
                     <div class="inline-block bg-yellow-400 text-yellow-900 text-[10px] font-black px-2.5 py-0.5 rounded-full mb-2 uppercase tracking-wider">
                         Pengguna Baru
                     </div>
-                    <h3 class="text-white font-extrabold text-xl leading-tight mb-1">Diskon 10% 🎉</h3>
+                    <h3 class="text-white font-extrabold text-xl leading-tight mb-1">Diskon 50% 🎉</h3>
                     <p class="text-green-100 text-xs font-medium opacity-90">Untuk booking pertama kamu di Palembang!</p>
                     <button class="mt-3 bg-white text-green-700 text-xs font-bold px-4 py-2 rounded-xl hover:bg-green-50 active:scale-95 transition shadow-sm">
                         Gunakan Kode

@@ -19,7 +19,7 @@ class Checkout extends Component
     public $bookingDate;
     public $selectedTimes = [];
     public $paymentType = 'full'; // Default bayar lunas
-    
+
     // Promo
     public $promoCode = '';
     public $appliedPromo = null;
@@ -51,18 +51,31 @@ class Checkout extends Component
 
         $bookedTimes = BookingItem::whereHas('booking', function ($q) {
             $q->where('field_id', $this->field->id)
-              ->whereDate('booking_date', $this->bookingDate)
-              ->whereIn('status', ['pending', 'dp_paid', 'paid']);
+                ->whereDate('booking_date', $this->bookingDate)
+                ->whereIn('status', ['pending', 'dp_paid', 'paid']);
         })->pluck('start_time')->map(fn($t) => Carbon::parse($t)->format('H:i:s'))->toArray();
+
+        // === TAMBAHAN: CEK WAKTU SAAT INI ===
+        $isToday = Carbon::parse($this->bookingDate)->isToday();
+        $currentTime = Carbon::now()->format('H:i:s');
 
         $times = [];
         foreach ($prices as $price) {
             $dbStart = Carbon::parse($price->start_time)->format('H:i:s');
+
+            // Cek apakah sudah dibooking orang lain
+            $isBooked = in_array($dbStart, $bookedTimes);
+
+            // JIKA TANGGAL HARI INI & JAM SUDAH LEWAT -> BLOKIR!
+            if ($isToday && $dbStart < $currentTime) {
+                $isBooked = true;
+            }
+
             $times[] = [
                 'start' => Carbon::parse($price->start_time)->format('H:i'),
                 'end' => Carbon::parse($price->end_time)->format('H:i'),
                 'price' => $price->price,
-                'is_booked' => in_array($dbStart, $bookedTimes),
+                'is_booked' => $isBooked,
                 'value' => "{$dbStart}|{$price->end_time}|{$price->price}"
             ];
         }
@@ -133,7 +146,7 @@ class Checkout extends Component
         // Jika lolos semua validasi
         $this->appliedPromo = $promo;
         session()->flash('success_promo', 'Promo berhasil digunakan!');
-        
+
         $this->calculateTotal();
     }
 
@@ -158,7 +171,7 @@ class Checkout extends Component
         }
 
         $afterDiscount = max(0, $this->subtotal - $this->discountAmount);
-        
+
         // PPN 11% (Dibulatkan ke atas)
         $this->ppnAmount = ceil($afterDiscount * 0.11);
         $this->grandTotal = $afterDiscount + $this->ppnAmount;
@@ -177,7 +190,7 @@ class Checkout extends Component
         ], [
             'selectedTimes.required' => 'Pilih minimal 1 jam bermain.',
         ]);
-        
+
         if (!empty($this->promoCode) && empty($this->appliedPromo)) {
             session()->flash('error_promo', 'Silakan batalkan/hapus voucher yang tidak valid sebelum membayar.');
             return; // Hentikan proses!
@@ -249,7 +262,7 @@ class Checkout extends Component
             Config::$curlOptions = [
                 CURLOPT_CONNECTTIMEOUT => 30, // Batas waktu bersalaman
                 CURLOPT_TIMEOUT => 30,        // Batas waktu tunggu respon
-                CURLOPT_HTTPHEADER => []      
+                CURLOPT_HTTPHEADER => []
             ];
 
             $params = [
@@ -266,7 +279,7 @@ class Checkout extends Component
 
             // 4. Buat Transaksi ke Midtrans
             $paymentUrl = Snap::createTransaction($params)->redirect_url;
-            
+
             $booking->update(['midtrans_snap_token' => $paymentUrl]);
 
             // Jika sampai tahap ini sukses, kunci penyimpanan database
@@ -274,11 +287,10 @@ class Checkout extends Component
 
             // Alihkan pelanggan ke portal pembayaran Midtrans
             return redirect()->away($paymentUrl);
-            
-        } catch (\Throwable $e) { 
+        } catch (\Throwable $e) {
             // Batalkan semua penyimpanan database jika di pertengahan ada yang gagal
             \DB::rollBack();
-            
+
             // Tampilkan detail kegagalan murni ke layar agar bisa kita baca masalahnya
             dd('ERROR FATAL DITEMUKAN: ' . $e->getMessage() . ' | DI BARIS: ' . $e->getLine());
         }

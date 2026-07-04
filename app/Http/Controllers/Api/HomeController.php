@@ -52,17 +52,38 @@ class HomeController extends Controller
                 'image_url' => $field->getFirstMediaUrl('gallery') ?: null,
                 'price_formatted' => number_format($price, 0, ',', '.'),
                 'rating' => '4.8',
-
-                // KUNCI UTAMA: Mengirimkan teks jarak hasil hitungan ke React Native
                 'distance' => $distanceText
             ];
         });
+
+        // === 4. LOGIKA BARU: AMBIL DATA NOTIFIKASI JIKA USER LOGIN ===
+        // Menggunakan guard 'sanctum' agar tetap berfungsi meskipun route ini public
+        $user = $request->user('sanctum');
+        $gameToday = null;
+        $recentBookings = [];
+
+        if ($user) {
+            // Cari jadwal main HARI INI yang statusnya sudah dibayar (Lunas/DP)
+            $gameToday = Booking::with('field')
+                ->where('user_id', $user->id)
+                ->whereIn('status', ['paid', 'dp_paid'])
+                ->whereDate('booking_date', \Carbon\Carbon::today())
+                ->first();
+
+            // Cari 5 transaksi terakhir untuk riwayat notifikasi
+            $recentBookings = Booking::where('user_id', $user->id)
+                ->latest()
+                ->take(5)
+                ->get();
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Data beranda berhasil diambil',
             'data' => [
-                'popular_fields' => $fields
+                'popular_fields' => $fields,
+                'game_today' => $gameToday,           // Mengirim jadwal hari ini ke React Native
+                'recent_bookings' => $recentBookings  // Mengirim riwayat pesanan ke React Native
             ]
         ], 200);
     }
@@ -339,15 +360,28 @@ class HomeController extends Controller
                 ->whereIn('status', ['pending', 'dp_paid', 'paid']);
         })->pluck('start_time')->map(fn($t) => \Carbon\Carbon::parse($t)->format('H:i:s'))->toArray();
 
+        // === TAMBAHAN: CEK WAKTU SAAT INI ===
+        $isToday = \Carbon\Carbon::parse($date)->isToday();
+        $currentTime = \Carbon\Carbon::now()->format('H:i:s');
+
         // Rangkai data untuk dikembalikan ke Mobile App
         $times = [];
         foreach ($prices as $price) {
             $dbStart = \Carbon\Carbon::parse($price->start_time)->format('H:i:s');
+
+            // Cek apakah sudah dibooking orang lain
+            $isBooked = in_array($dbStart, $bookedTimes);
+
+            // JIKA TANGGAL HARI INI & JAM SUDAH LEWAT -> BLOKIR!
+            if ($isToday && $dbStart < $currentTime) {
+                $isBooked = true;
+            }
+
             $times[] = [
                 'start' => \Carbon\Carbon::parse($price->start_time)->format('H:i'),
                 'end' => \Carbon\Carbon::parse($price->end_time)->format('H:i'),
                 'price' => $price->price,
-                'is_booked' => in_array($dbStart, $bookedTimes), // Boolean: true jika penuh, false jika kosong
+                'is_booked' => $isBooked,
             ];
         }
 
